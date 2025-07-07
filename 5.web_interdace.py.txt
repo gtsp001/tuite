@@ -1,0 +1,57 @@
+﻿from flask import Flask, render_template, request, redirect, url_for
+import json
+
+def create_app(clients, strategies, positions, config, start_strategy, stop_strategy, close_position):
+    app = Flask(__name__)
+    
+    def get_symbols():
+        exchange_info = clients[1].futures_exchange_info()
+        return [s['symbol'] for s in exchange_info['symbols'] if s['contractType'] == 'PERPETUAL' and s['quoteAsset'] == 'USDT']
+
+    @app.route('/', methods=['GET', 'POST'])
+    def index():
+        if request.method == 'POST':
+            username = request.form['username']
+            password = request.form['password']
+            if username == 'admin' and password == 'password':
+                symbols = get_symbols()
+                return render_template('index.html', clients=clients, strategies=strategies, positions=positions, config=config, symbols=symbols)
+            return "登录失败"
+        return '''
+        <form method="post">
+            用户名: <input type="text" name="username"><br>
+            密码: <input type="password" name="password"><br>
+            <input type="submit" value="登录">
+        </form>
+        '''
+
+    @app.route('/start/<int:api_id>/<strategy>', methods=['POST'])
+    def start(api_id, strategy):
+        symbol = request.form['symbol']
+        params = {
+            'symbol': symbol,
+            'leverage': int(request.form['leverage']),
+            'initial_amount_usdt': float(request.form['initial_amount_usdt']),
+            'order_amount_usdt': float(request.form['order_amount_usdt']),
+            'buy_pct': float(request.form['buy_pct']),
+            'sell_pct': float(request.form['sell_pct']),
+            'margin_mode': request.form['margin_mode'],
+            'profit_split': float(request.form.get('profit_split', 0.5)),
+            'max_orders': int(request.form.get('max_orders', 5))
+        }
+        if strategy == 'floating_profit':
+            params['initial_leverage'] = int(request.form['initial_leverage'])
+        start_strategy(api_id, strategy, symbol, params)
+        return redirect(url_for('index'))
+
+    @app.route('/stop/<int:api_id>')
+    def stop(api_id):
+        stop_strategy(api_id)
+        return redirect(url_for('index'))
+
+    @app.route('/close/<int:api_id>')
+    def close(api_id):
+        close_position(api_id)
+        return redirect(url_for('index'))
+
+    return app

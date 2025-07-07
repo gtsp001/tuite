@@ -1,0 +1,72 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>币安量化交易机器人</title>
+</head>
+<body>
+    <h1>币安量化交易机器人</h1>
+    {% for api_id, client in clients.items() %}
+        <h2>API {{ api_id }}</h2>
+        <p>状态: {{ '运行中' if strategies[api_id] else '已停止' }}</p>
+        <p>仓位: {{ positions[api_id]['symbol'] or '无' }} ({{ positions[api_id]['amount'] }} {{ positions[api_id]['symbol'][:-4] if positions[api_id]['symbol'] else '' }})</p>
+        <form action="/start/{{ api_id }}/grid" method="post">
+            <label>交易对:</label>
+            <select name="symbol">
+                {% for symbol in symbols %}
+                    <option value="{{ symbol }}">{{ symbol }}</option>
+                {% endfor %}
+            </select><br>
+            <label>杠杆倍数:</label><input type="number" name="leverage" value="{{ config.strategies.grid.leverage }}"><br>
+            <label>初始建仓金额(USDT):</label><input type="number" name="initial_amount_usdt" value="{{ config.strategies.grid.initial_amount_usdt }}"><br>
+            <label>每个挂单金额(USDT):</label><input type="number" name="order_amount_usdt" value="{{ config.strategies.grid.order_amount_usdt }}"><br>
+            <label>买入百分比:</label><input type="number" step="0.0001" name="buy_pct" value="{{ config.strategies.grid.buy_pct }}"><br>
+            <label>卖出百分比:</label><input type="number" step="0.0001" name="sell_pct" value="{{ config.strategies.grid.sell_pct }}"><br>
+            <label>保证金模式:</label>
+            <select name="margin_mode">
+                <option value="isolated">逐仓</option>
+                <option value="cross">全仓</option>
+            </select><br>
+            <input type="submit" value="启动网格策略">
+        </form>
+        <form action="/start/{{ api_id }}/grid_profit" method="post">
+            <label>交易对:</label>
+            <select name="symbol">
+                {% for symbol in symbols %}
+                    <option value="{{ symbol }}">{{ symbol }}</option>
+                {% endfor %}
+            </select><br>
+            <label>杠杆倍数:</label><input type="number" name="leverage" value="{{ config.strategies.grid.leverage }}"><br>
+            <label>初始建仓金额(USDT):</label><input type="number" name="initial_amount_usdt" value="{{ config.strategies.grid.initial_amount_usdt }}"><br>
+            <label>每个挂单金额(USDT):</label><input type="number" name="order_amount_usdt" value="{{ config.strategies.grid.order_amount_usdt }}"><br>
+            <label>买入百分比:</label><input type="number" step="0.0001" name="buy_pct" value="{{ config.strategies.grid.buy_pct }}"><br>
+            <label>卖出百分比:</label><input type="number" step="0.0001" name="sell_pct" value="{{ config.strategies.grid.sell_pct }}"><br>
+            <label>盈利分配比例(0-1):</label><input type="number" step="0.01" name="profit_split" value="{{ config.strategies.grid_profit.profit_split }}"><br>
+            <label>后续挂单数量(1-10):</label><input type="number" name="max_orders" value="{{ config.strategies.grid_profit.max_orders }}"><br>
+            <label>保证金模式:</label>
+            <select name="margin_mode">
+                <option value="isolated">逐仓</option>
+                <option value="cross">全仓</option>
+            </select><br>
+            <input type="submit" value="启动网格盈利加仓策略">
+        </form>
+        <form action="/start/{{ api_id }}/floating_profit" method="post">
+            <label>交易对:</label>
+            <select name="symbol">
+                {% for symbol in symbols %}
+                    <option value="{{ symbol }}">{{ symbol }}</option>
+                {% endfor %}
+            </select><br>
+            <label>初始杠杆倍数:</label><input type="number" name="initial_leverage" value="{{ config.strategies.floating_profit.initial_leverage }}"><br>
+            <label>初始建仓金额(USDT):</label><input type="number" name="initial_amount_usdt" value="{{ config.strategies.grid.initial_amount_usdt }}"><br>
+            <input type="submit" value="启动浮盈加仓策略">
+        </form>
+        <form action="/stop/{{ api_id }}">
+            <input type="submit" value="停止策略">
+        </form>
+        <form action="/close/{{ api_id }}">
+            <input type="submit" value="一键平仓">
+        </form>
+    {% endfor %}
+</body>
+</html>

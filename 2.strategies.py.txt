@@ -1,0 +1,145 @@
+﻿from binance.enums import *
+from notifications import send_dingtalk_notification
+import time
+import threading
+
+class GridStrategy:
+    def __init__(self, client, config, symbol, position, webhook):
+        self.client = client
+        self.config = config
+        self.symbol = symbol
+        self.position = position
+        self.webhook = webhook
+        self.running = False
+
+    def start(self):
+        self.running = True
+        price = float(self.client.futures_symbol_ticker(symbol=self.symbol)['price'])
+        qty = self.config['initial_amount_usdt'] / price
+        self.client.futures_create_order(
+            symbol=self.symbol, side=SIDE_BUY, type=ORDER_TYPE_MARKET, quantity=qty
+        )
+        self.position = {'active': True, 'symbol': self.symbol, 'amount': qty, 'entry_price': price}
+        send_dingtalk_notification(self.webhook, f"开仓: {self.symbol} @ {price}")
+        
+        sell_price = price * (1 + self.config['sell_pct'])
+        self.client.futures_create_order(
+            symbol=self.symbol, side=SIDE_SELL, type=ORDER_TYPE_LIMIT,
+            price=sell_price, quantity=qty, timeInForce=TIME_IN_FORCE_GTC
+        )
+        
+        threading.Thread(target=self.run_grid).start()
+
+    def run_grid(self):
+        last_sell_price = None
+        while self.running:
+            price = float(self.client.futures_symbol_ticker(symbol=self.symbol)['price'])
+            qty = self.config['order_amount_usdt'] / price
+            
+            buy_price = price * (1 - self.config['buy_pct'])
+            self.client.futures_create_order(
+                symbol=self.symbol, side=SIDE_BUY, type=ORDER_TYPE_LIMIT,
+                price=buy_price, quantity=qty, timeInForce=TIME_IN_FORCE_GTC
+            )
+            
+            orders = self.client.futures_get_open_orders(symbol=self.symbol)
+            if not any(o['side'] == 'SELL' for o in orders) and last_sell_price:
+                buy_price = last_sell_price * (1 - self.config['buy_pct'])
+                self.client.futures_create_order(
+                    symbol=self.symbol, side=SIDE_BUY, type=ORDER_TYPE_LIMIT,
+                    price=buy_price, quantity=qty, timeInForce=TIME_IN_FORCE_GTC
+                )
+                send_dingtalk_notification(self.webhook, f"卖单成交，挂新买单: {buy_price}")
+                last_sell_price = None
+            elif any(o['side'] == 'SELL' for o in orders):
+                last_sell_price = float(orders[0]['price'])
+            
+            time.sleep(60)
+
+    def stop(self):
+        self.running = False
+
+class GridProfitStrategy(GridStrategy):
+    def __init__(self, client, config, profit_config, symbol, position, webhook):
+        super().__init__(client, config, symbol, position, webhook)
+        self.profit_split = profit_config['profit_split']
+        self.max_orders = profit_config['max_orders']
+
+    def run_grid(self):
+        last_sell_price = None
+        while self.running:
+            price = float(self.client.futures_symbol_ticker(symbol=self.symbol)['price'])
+            qty = self.config['order_amount_usdt'] / price
+            
+            orders = self.client.futures_get_open_orders(symbol=self.symbol)
+            if not any(o['side'] == 'SELL' for o in orders) and last_sell_price:
+                profit = (last_sell_price - self.position['entry_price']) * self.position['amount']
+                profit_to_reinvest = profit * self.profit_split
+                orders_to_place = min(self.max_orders, int(profit_to_reinvest / self.config['order_amount_usdt']) + 1)
+                
+                for i in range(orders_to_place):
+                    buy_price = last_sell_price * (1 - self.config['buy_pct'] * (1 + i * 0.1))
+                    buy_qty = (self.config['order_amount_usdt'] + (profit_to_reinvest / orders_to_place)) / buy_price
+                    self.client.futures_create_order(
+                        symbol=self.symbol, side=SIDE_BUY, type=ORDER_TYPE_LIMIT,
+                        price=buy_price, quantity=buy_qty, timeInForce=TIME_IN_FORCE_GTC
+                    )
+                    send_dingtalk_notification(self.webhook, f"卖单成交，挂新买单: {buy_price}, 数量: {buy_qty}")
+                last_sell_price = None
+            elif any(o['side'] == 'SELL' for o in orders):
+                last_sell_price = float(orders[0]['price'])
+            
+            buy_price = price * (1 - self.config['buy_pct'])
+            self.client.futures_create_order(
+                symbol=self.symbol, side=SIDE_BUY, type=ORDER_TYPE_LIMIT,
+                price=buy_price, quantity=qty, timeInForce=TIME_IN_FORCE_GTC
+            )
+            
+            time.sleep(60)
+
+class FloatingProfitStrategy:
+    def __init__(self, client, config, stages, symbol, position, webhook):
+        self.client = client
+        self.config = config
+        self.stages = stages['stages']
+        self.symbol = symbol
+        self.position = position
+        self.webhook = webhook
+        self.running = False
+
+    def start(self):
+        self.running = True
+        price = float(self.client.futures_symbol_ticker(symbol=self.symbol)['price'])
+        qty = self.config['initial_amount_usdt'] / price
+        self.client.futures_change_leverage(symbol=self.symbol, leverage=self.config['initial_leverage'])
+        self.client.futures_create_order(
+            symbol=self.symbol, side=SIDE_BUY, type=ORDER_TYPE_MARKET, quantity=qty
+        )
+        self.position = {'active': True, 'symbol': self.symbol, 'amount': qty, 'entry_price': price}
+        send_dingtalk_notification(self.webhook, f"开仓: {self.symbol} @ {price}")
+        
+        threading.Thread(target=self.run_floating).start()
+
+    def run_floating(self):
+        stage_idx = 0
+        while self.running:
+            price = float(self.client.futures_symbol_ticker(symbol=self.symbol)['price'])
+            profit_pct = (price / self.position['entry_price']) - 1
+            
+            if stage_idx < len(self.stages) and profit_pct >= self.stages[stage_idx]['profit_pct']:
+                new_leverage = self.stages[stage_idx]['leverage']
+                self.client.futures_change_leverage(symbol=self.symbol, leverage=new_leverage)
+                profit_usdt = (price - self.position['entry_price']) * self.position['amount']
+                new_qty = profit_usdt / price
+                self.client.futures_create_order(
+                    symbol=self.symbol, side=SIDE_BUY, type=ORDER_TYPE_MARKET, quantity=new_qty
+                )
+                self.position['amount'] += new_qty
+                self.position['entry_price'] = price
+                stage_idx += 1
+                send_dingtalk_notification(self.webhook, f"加仓: {self.symbol} @ {price}, 杠杆: {new_leverage}")
+            
+            time.sleep(60)
+
+    def stop(self):
+        self.running = False

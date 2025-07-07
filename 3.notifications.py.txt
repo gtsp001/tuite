@@ -1,0 +1,11 @@
+﻿import requests
+
+def send_dingtalk_notification(webhook, message):
+    payload = {
+        "msgtype": "text",
+        "text": {"content": message}
+    }
+    try:
+        requests.post(webhook, json=payload)
+    except Exception as e:
+        print(f"钉钉通知失败: {e}")

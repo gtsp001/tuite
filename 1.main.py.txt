@@ -1,0 +1,106 @@
+﻿import json
+import threading
+from binance.client import Client
+from binance.enums import *
+from strategies import GridStrategy, GridProfitStrategy, FloatingProfitStrategy
+from notifications import send_dingtalk_notification
+from funding_rate import monitor_funding_rate
+from web_interface import create_app
+import time
+
+# 加载配置
+with open('config.json', 'r') as f:
+    config = json.load(f)
+
+# API 客户端
+clients = {
+    api['id']: Client(api['api_key'], api['api_secret'], testnet=True)  # 测试网
+    for api in config['apis']
+}
+
+# 策略状态
+strategies = {api_id: None for api_id in clients}
+positions = {api_id: {'active': False, 'symbol': None, 'amount': 0, 'entry_price': 0} for api_id in clients}
+
+# 初始化 API 客户端
+def initialize_api(client, symbol, leverage, margin_mode):
+    client.futures_change_leverage(symbol=symbol, leverage=leverage)
+    client.futures_change_margin_type(symbol=symbol, marginType=margin_mode.upper())
+
+# 启动策略
+def start_strategy(api_id, strategy_name, symbol, params=None):
+    global strategies, positions
+    client = clients[api_id]
+    config_strategy = params or config['strategies'][strategy_name]
+    
+    initialize_api(client, symbol, config_strategy['leverage'], config_strategy['margin_mode'])
+    
+    if strategy_name == 'grid':
+        strategies[api_id] = GridStrategy(client, config_strategy, symbol, positions[api_id], config['apis'][api_id-1]['dingtalk_webhook'])
+    elif strategy_name == 'grid_profit':
+        strategies[api_id] = GridProfitStrategy(client, config_strategy, config['strategies']['grid_profit'], symbol, positions[api_id], config['apis'][api_id-1]['dingtalk_webhook'])
+    elif strategy_name == 'floating_profit':
+        strategies[api_id] = FloatingProfitStrategy(client, config_strategy, config['strategies']['floating_profit'], symbol, positions[api_id], config['apis'][api_id-1]['dingtalk_webhook'])
+    
+    strategies[api_id].start()
+    send_dingtalk_notification(config['apis'][api_id-1]['dingtalk_webhook'], f"API {api_id} 启动 {strategy_name} 策略，币种: {symbol}")
+
+# 停止策略
+def stop_strategy(api_id):
+    global strategies
+    if strategies[api_id]:
+        strategies[api_id].stop()
+        strategies[api_id] = None
+        send_dingtalk_notification(config['apis'][api_id-1]['dingtalk_webhook'], f"API {api_id} 停止策略")
+
+# 一键平仓
+def close_position(api_id):
+    global positions
+    client = clients[api_id]
+    position = positions[api_id]
+    if position['active']:
+        client.futures_create_order(
+            symbol=position['symbol'],
+            side=SIDE_SELL,
+            type=ORDER_TYPE_MARKET,
+            quantity=position['amount']
+        )
+        send_dingtalk_notification(
+            config['apis'][api_id-1]['dingtalk_webhook'],
+            get_position_notification(api_id, position['symbol'], '收网')
+        )
+        positions[api_id] = {'active': False, 'symbol': None, 'amount': 0, 'entry_price': 0}
+
+# 获取仓位通知内容
+def get_position_notification(api_id, symbol, action):
+    client = clients[api_id]
+    price = float(client.futures_symbol_ticker(symbol=symbol)['price'])
+    position = client.futures_position_information(symbol=symbol)[0]
+    balance = float(client.futures_account()['totalWalletBalance'])
+    profit = float(position['unRealizedProfit'])
+    leverage = float(position['leverage'])
+    qty = float(position['positionAmt'])
+    coin = symbol[:-4]  # 动态币种显示
+    orders = client.futures_get_open_orders(symbol=symbol)
+    order_info = "\n".join([f"挂单价格({coin}): {o['price']} 数量: {o['origQty']}" for o in orders])
+    
+    return (f"{action}\n"
+            f"当前价格({coin}): {price}\n"
+            f"账户总持仓量({coin}): {qty}\n"
+            f"{order_info}\n"
+            f"账户总余额(USDT): {balance}\n"
+            f"账户总盈亏(USDT): {profit}\n"
+            f"总收益率: {(profit/balance*100):.2f}%\n"
+            f"总资金杠杆: {leverage}倍")
+
+# 主程序
+def main():
+    # 启动资金费率监控
+    threading.Thread(target=monitor_funding_rate, args=(clients[1], config['funding_rate'])).start()
+    
+    # 启动 Web 服务器
+    app = create_app(clients, strategies, positions, config, start_strategy, stop_strategy, close_position)
+    app.run(host='0.0.0.0', port=5000)
+
+if __name__ == "__main__":
+    main()

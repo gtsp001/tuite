@@ -1,0 +1,18 @@
+﻿import time
+from notifications import send_dingtalk_notification
+
+def monitor_funding_rate(client, config):
+    notified = {}
+    while True:
+        rates = client.futures_funding_rate()
+        for rate_info in rates:
+            symbol = rate_info['symbol']
+            rate = float(rate_info['fundingRate'])
+            if abs(rate) >= config['threshold'] and (symbol not in notified or time.time() - notified[symbol] > config['notify_cooldown']):
+                msg = (f"资金费率异动\n"
+                       f"币种: {symbol}\n"
+                       f"费率: {rate*100:.2f}%\n"
+                       f"时间: {time.strftime('%Y/%m/%d %H:%M:%S')}")
+                send_dingtalk_notification(config['apis'][0]['dingtalk_webhook'], msg)
+                notified[symbol] = time.time()
+        time.sleep(config['check_interval'])

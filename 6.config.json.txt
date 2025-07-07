@@ -1,0 +1,50 @@
+﻿{
+  "apis": [
+    {
+      "id": 1,
+      "api_key": "YOUR_API_KEY_1",
+      "api_secret": "YOUR_API_SECRET_1",
+      "dingtalk_webhook": "YOUR_DINGTALK_WEBHOOK_1"
+    },
+    {
+      "id": 2,
+      "api_key": "YOUR_API_KEY_2",
+      "api_secret": "YOUR_API_SECRET_2",
+      "dingtalk_webhook": "YOUR_DINGTALK_WEBHOOK_2"
+    },
+    {
+      "id": 3,
+      "api_key": "YOUR_API_KEY_3",
+      "api_secret": "YOUR_API_SECRET_3",
+      "dingtalk_webhook": "YOUR_DINGTALK_WEBHOOK_3"
+    }
+  ],
+  "strategies": {
+    "grid": {
+      "symbol": "BTCUSDT",
+      "leverage": 10,
+      "initial_amount_usdt": 1000,
+      "order_amount_usdt": 100,
+      "buy_pct": 0.0095,
+      "sell_pct": 0.0105,
+      "margin_mode": "isolated"
+    },
+    "grid_profit": {
+      "profit_split": 0.5,
+      "max_orders": 5
+    },
+    "floating_profit": {
+      "initial_leverage": 25,
+      "stages": [
+        {"profit_pct": 0.04, "leverage": 20},
+        {"profit_pct": 0.05, "leverage": 15},
+        {"profit_pct": 0.066, "leverage": 10}
+      ]
+    }
+  },
+  "funding_rate": {
+    "threshold": 0.005,
+    "check_interval": 3600,
+    "notify_cooldown": 86400
+  }
+}
